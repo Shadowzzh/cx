@@ -103,6 +103,29 @@ run_test_direct_launch() {
   rm -rf "$temp_dir"
 }
 
+run_test_direct_launch_without_passthrough() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  : > "$temp_dir/prompts.txt"
+
+  PATH="$temp_dir/bin:$PATH" \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    bash "$CX_BIN" no-yolo low gpt-5.4
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="low"'
+  assert_not_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+
+  if [[ -s "$temp_dir/prompts.txt" ]]; then
+    fail "direct launch without passthrough should not open any menu"
+  fi
+
+  rm -rf "$temp_dir"
+}
+
 run_test_model_only_prompt() {
   local temp_dir
   temp_dir="$(mktemp -d)"
@@ -147,6 +170,28 @@ run_test_reasoning_and_yolo_prompt() {
   rm -rf "$temp_dir"
 }
 
+run_test_reasoning_and_yolo_prompt_without_passthrough() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  : > "$temp_dir/prompts.txt"
+
+  PATH="$temp_dir/bin:$PATH" \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    bash "$CX_BIN" gpt-5.4
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="high"'
+  assert_not_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+  assert_contains "$temp_dir/prompts.txt" '思考等级: '
+  assert_contains "$temp_dir/prompts.txt" 'Yolo: '
+  assert_not_contains "$temp_dir/prompts.txt" 'Model: '
+
+  rm -rf "$temp_dir"
+}
+
 run_test_install_script() {
   local temp_dir
   temp_dir="$(mktemp -d)"
@@ -162,6 +207,26 @@ EOF
     bash "$ROOT_DIR/scripts/install.sh" >/dev/null
 
   [[ -x "$temp_dir/home/.local/bin/cx" ]] || fail "install should place cx in ~/.local/bin"
+
+  rm -rf "$temp_dir"
+}
+
+run_test_install_script_from_stdin() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  mkdir -p "$temp_dir/home/.local/bin" "$temp_dir/fake-bin"
+  cat > "$temp_dir/fake-bin/codex" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$temp_dir/fake-bin/codex"
+
+  HOME="$temp_dir/home" PATH="$temp_dir/fake-bin:$PATH" \
+    bash < "$ROOT_DIR/scripts/install.sh" >"$temp_dir/stdout.txt" 2>"$temp_dir/stderr.txt"
+
+  [[ -x "$temp_dir/home/.local/bin/cx" ]] || fail "stdin install should place cx in ~/.local/bin"
+  assert_not_contains "$temp_dir/stderr.txt" 'BASH_SOURCE[0]: unbound variable'
 
   rm -rf "$temp_dir"
 }
@@ -182,9 +247,12 @@ run_test_uninstall_script() {
 
 main() {
   run_test_direct_launch
+  run_test_direct_launch_without_passthrough
   run_test_model_only_prompt
   run_test_reasoning_and_yolo_prompt
+  run_test_reasoning_and_yolo_prompt_without_passthrough
   run_test_install_script
+  run_test_install_script_from_stdin
   run_test_uninstall_script
   echo "PASS"
 }

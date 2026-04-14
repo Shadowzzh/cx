@@ -257,11 +257,21 @@ main() {
     if [[ "$yolo_state" == "yes" ]]; then
       yolo_enabled="1"
     fi
-    launch_codex "$reasoning" "$yolo_enabled" "$model" "${passthrough[@]}"
+
+    if ((${#passthrough[@]} > 0)); then
+      launch_codex "$reasoning" "$yolo_enabled" "$model" "${passthrough[@]}"
+    else
+      launch_codex "$reasoning" "$yolo_enabled" "$model"
+    fi
+
     return 0
   fi
 
-  open_menu "$reasoning" "$yolo_state" "$model" "${passthrough[@]}"
+  if ((${#passthrough[@]} > 0)); then
+    open_menu "$reasoning" "$yolo_state" "$model" "${passthrough[@]}"
+  else
+    open_menu "$reasoning" "$yolo_state" "$model"
+  fi
 }
 
 main "$@"

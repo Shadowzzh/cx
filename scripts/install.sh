@@ -2,9 +2,16 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOCAL_SOURCE="$REPO_ROOT/bin/cx"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+REPO_ROOT=""
+LOCAL_SOURCE=""
+
+if [[ -n "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  LOCAL_SOURCE="$REPO_ROOT/bin/cx"
+fi
 DEFAULT_DOWNLOAD_URL="${CX_DOWNLOAD_URL:-https://raw.githubusercontent.com/Shadowzzh/cx/main/bin/cx}"
 INSTALL_BIN_DIR="${CX_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 WRITE_SHELL_CONFIG="0"
@@ -60,7 +67,7 @@ ensure_dependencies() {
 }
 
 ensure_source() {
-  if [[ -f "$LOCAL_SOURCE" ]]; then
+  if [[ -n "$LOCAL_SOURCE" && -f "$LOCAL_SOURCE" ]]; then
     printf '%s\n' "$LOCAL_SOURCE"
     return 0
   fi
