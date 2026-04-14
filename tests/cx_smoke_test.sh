@@ -29,6 +29,14 @@ assert_not_contains() {
   fi
 }
 
+assert_file_empty() {
+  local file="$1"
+
+  if [[ -s "$file" ]]; then
+    fail "expected $file to be empty"
+  fi
+}
+
 make_fake_commands() {
   local dir="$1"
 
@@ -39,65 +47,24 @@ make_fake_commands() {
 printf '%s\n' "$*" > "${CX_TEST_OUTPUT:?}"
 EOF
   chmod +x "$dir/codex"
-
-  cat > "$dir/fzf" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -n "${CX_TEST_FZF_ARGS:-}" ]]; then
-  printf '%s\n' "$@" > "$CX_TEST_FZF_ARGS"
-fi
-
-if [[ -n "${CX_TEST_FZF_ENV:-}" ]]; then
-  {
-    printf 'FZF_DEFAULT_OPTS=%s\n' "${FZF_DEFAULT_OPTS-<unset>}"
-    printf 'FZF_DEFAULT_OPTS_FILE=%s\n' "${FZF_DEFAULT_OPTS_FILE-<unset>}"
-  } > "$CX_TEST_FZF_ENV"
-fi
-
-prompt=""
-for arg in "$@"; do
-  case "$arg" in
-    --prompt=*)
-      prompt="${arg#--prompt=}"
-      ;;
-  esac
-done
-
-printf '%s\n' "$prompt" >> "${CX_TEST_PROMPTS:?}"
-options=()
-while IFS= read -r line; do
-  options+=("$line")
-done
-
-case "$prompt" in
-  "思考等级: ")
-    printf '%s\n' "high"
-    ;;
-  "Yolo: ")
-    printf '%s\n' "no"
-    ;;
-  "Model: ")
-    printf '%s\n' "gpt-5.2-codex"
-    ;;
-  *)
-    if ((${#options[@]} == 0)); then
-      exit 1
-    fi
-    printf '%s\n' "${options[0]}"
-    ;;
-esac
-EOF
-  chmod +x "$dir/fzf"
 }
 
-assert_line_present() {
-  local file="$1"
-  local expected="$2"
+run_cx() {
+  local temp_dir="$1"
+  local input="$2"
+  shift 2
+  local test_path="$temp_dir/bin:/usr/bin:/bin"
 
-  if ! grep -Fx -- "$expected" "$file" >/dev/null 2>&1; then
-    fail "expected line '$expected' in $file"
+  if [[ -n "$input" ]]; then
+    PATH="$test_path" \
+      CX_TEST_OUTPUT="$temp_dir/output.txt" \
+      bash "$CX_BIN" "$@" >"$temp_dir/transcript.txt" 2>&1 <<<"$input"
+    return 0
   fi
+
+  PATH="$test_path" \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    bash "$CX_BIN" "$@" >"$temp_dir/transcript.txt" 2>&1
 }
 
 run_test_direct_launch() {
@@ -105,21 +72,14 @@ run_test_direct_launch() {
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
 
-  PATH="$temp_dir/bin:$PATH" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    bash "$CX_BIN" yolo xhigh gpt-5.4 hello
+  run_cx "$temp_dir" "" yolo xhigh gpt-5.4 hello
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
   assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
   assert_contains "$temp_dir/output.txt" 'hello'
-
-  if [[ -s "$temp_dir/prompts.txt" ]]; then
-    fail "direct launch should not open any menu"
-  fi
+  assert_file_empty "$temp_dir/transcript.txt"
 
   rm -rf "$temp_dir"
 }
@@ -129,20 +89,13 @@ run_test_direct_launch_without_passthrough() {
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
 
-  PATH="$temp_dir/bin:$PATH" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    bash "$CX_BIN" no-yolo low gpt-5.4
+  run_cx "$temp_dir" "" no-yolo low gpt-5.4
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="low"'
   assert_not_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
-
-  if [[ -s "$temp_dir/prompts.txt" ]]; then
-    fail "direct launch without passthrough should not open any menu"
-  fi
+  assert_file_empty "$temp_dir/transcript.txt"
 
   rm -rf "$temp_dir"
 }
@@ -152,19 +105,15 @@ run_test_model_only_prompt() {
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
 
-  PATH="$temp_dir/bin:$PATH" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    bash "$CX_BIN" yolo xhigh hello
+  run_cx "$temp_dir" $'2' yolo xhigh hello
 
-  assert_contains "$temp_dir/output.txt" '--model gpt-5.2-codex'
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.3-codex'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
   assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
-  assert_contains "$temp_dir/prompts.txt" 'Model: '
-  assert_not_contains "$temp_dir/prompts.txt" '思考等级: '
-  assert_not_contains "$temp_dir/prompts.txt" 'Yolo: '
+  assert_contains "$temp_dir/transcript.txt" 'Model'
+  assert_not_contains "$temp_dir/transcript.txt" '思考等级'
+  assert_not_contains "$temp_dir/transcript.txt" 'Yolo'
 
   rm -rf "$temp_dir"
 }
@@ -174,19 +123,15 @@ run_test_reasoning_and_yolo_prompt() {
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
 
-  PATH="$temp_dir/bin:$PATH" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    bash "$CX_BIN" gpt-5.4 hello
+  run_cx "$temp_dir" $'4\n2' gpt-5.4 hello
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="high"'
   assert_not_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
-  assert_contains "$temp_dir/prompts.txt" '思考等级: '
-  assert_contains "$temp_dir/prompts.txt" 'Yolo: '
-  assert_not_contains "$temp_dir/prompts.txt" 'Model: '
+  assert_contains "$temp_dir/transcript.txt" '思考等级'
+  assert_contains "$temp_dir/transcript.txt" 'Yolo'
+  assert_not_contains "$temp_dir/transcript.txt" 'Model'
 
   rm -rf "$temp_dir"
 }
@@ -196,71 +141,77 @@ run_test_reasoning_and_yolo_prompt_without_passthrough() {
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
 
-  PATH="$temp_dir/bin:$PATH" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    bash "$CX_BIN" gpt-5.4
+  run_cx "$temp_dir" $'4\n2' gpt-5.4
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="high"'
   assert_not_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
-  assert_contains "$temp_dir/prompts.txt" '思考等级: '
-  assert_contains "$temp_dir/prompts.txt" 'Yolo: '
-  assert_not_contains "$temp_dir/prompts.txt" 'Model: '
+  assert_contains "$temp_dir/transcript.txt" '思考等级'
+  assert_contains "$temp_dir/transcript.txt" 'Yolo'
+  assert_not_contains "$temp_dir/transcript.txt" 'Model'
 
   rm -rf "$temp_dir"
 }
 
-run_test_fzf_ignores_preview_and_enables_cycle() {
+run_test_back_with_shortcut() {
   local temp_dir
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
-  : > "$temp_dir/fzfrc"
 
-  PATH="$temp_dir/bin:$PATH" \
-    FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
-    FZF_DEFAULT_OPTS_FILE="$temp_dir/fzfrc" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
-    CX_TEST_FZF_ENV="$temp_dir/fzf_env.txt" \
-    bash "$CX_BIN" yolo xhigh hello
+  run_cx "$temp_dir" $'2\n2\nb\n1\n1'
 
-  assert_line_present "$temp_dir/fzf_args.txt" '--cycle'
-  assert_not_contains "$temp_dir/fzf_args.txt" '--preview'
-  assert_not_contains "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
-  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS='
-  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS_FILE='
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="low"'
+  assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
 
   rm -rf "$temp_dir"
 }
 
-run_test_fzf_can_inherit_all_opts() {
+run_test_back_with_menu_item() {
   local temp_dir
   temp_dir="$(mktemp -d)"
 
   make_fake_commands "$temp_dir/bin"
-  : > "$temp_dir/prompts.txt"
-  : > "$temp_dir/fzfrc"
 
-  PATH="$temp_dir/bin:$PATH" \
-    FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
-    FZF_DEFAULT_OPTS_FILE="$temp_dir/fzfrc" \
-    CX_TEST_OUTPUT="$temp_dir/output.txt" \
-    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
-    CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
-    CX_TEST_FZF_ENV="$temp_dir/fzf_env.txt" \
-    CX_FZF_INHERIT_ALL="1" \
-    bash "$CX_BIN" yolo xhigh hello
+  run_cx "$temp_dir" $'5\n2\n8\n1\n1'
 
-  assert_line_present "$temp_dir/fzf_args.txt" '--preview'
-  assert_line_present "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
-  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS=--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"'
-  assert_line_present "$temp_dir/fzf_env.txt" "FZF_DEFAULT_OPTS_FILE=$temp_dir/fzfrc"
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
+  assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+  assert_contains "$temp_dir/transcript.txt" '返回上一步'
+
+  rm -rf "$temp_dir"
+}
+
+run_test_custom_model_back_returns_to_model_menu() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+
+  run_cx "$temp_dir" $'1\n1\n7\nb\n2'
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.3-codex'
+  assert_not_contains "$temp_dir/output.txt" '--model b'
+  assert_contains "$temp_dir/transcript.txt" '请输入自定义 model'
+
+  rm -rf "$temp_dir"
+}
+
+run_test_back_skips_cli_fixed_values() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+
+  run_cx "$temp_dir" $'4\nb\n5\n1' yolo
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
+  assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+  assert_not_contains "$temp_dir/transcript.txt" 'Yolo'
 
   rm -rf "$temp_dir"
 }
@@ -276,11 +227,12 @@ exit 0
 EOF
   chmod +x "$temp_dir/fake-bin/codex"
 
-  HOME="$temp_dir/home" PATH="$temp_dir/fake-bin:$PATH" \
+  HOME="$temp_dir/home" PATH="$temp_dir/fake-bin:/usr/bin:/bin" \
     bash "$ROOT_DIR/scripts/install.sh" >"$temp_dir/stdout.txt"
 
   [[ -x "$temp_dir/home/.local/bin/cx" ]] || fail "install should place cx in ~/.local/bin"
   assert_contains "$temp_dir/stdout.txt" "安装 cx 版本: $CX_VERSION (build "
+  assert_not_contains "$temp_dir/stdout.txt" 'fzf'
 
   rm -rf "$temp_dir"
 }
@@ -296,12 +248,13 @@ exit 0
 EOF
   chmod +x "$temp_dir/fake-bin/codex"
 
-  HOME="$temp_dir/home" PATH="$temp_dir/fake-bin:$PATH" \
+  HOME="$temp_dir/home" PATH="$temp_dir/fake-bin:/usr/bin:/bin" \
     bash < "$ROOT_DIR/scripts/install.sh" >"$temp_dir/stdout.txt" 2>"$temp_dir/stderr.txt"
 
   [[ -x "$temp_dir/home/.local/bin/cx" ]] || fail "stdin install should place cx in ~/.local/bin"
   assert_not_contains "$temp_dir/stderr.txt" 'BASH_SOURCE[0]: unbound variable'
   assert_contains "$temp_dir/stdout.txt" "安装 cx 版本: $CX_VERSION (build "
+  assert_not_contains "$temp_dir/stdout.txt" 'fzf'
 
   rm -rf "$temp_dir"
 }
@@ -326,8 +279,10 @@ main() {
   run_test_model_only_prompt
   run_test_reasoning_and_yolo_prompt
   run_test_reasoning_and_yolo_prompt_without_passthrough
-  run_test_fzf_ignores_preview_and_enables_cycle
-  run_test_fzf_can_inherit_all_opts
+  run_test_back_with_shortcut
+  run_test_back_with_menu_item
+  run_test_custom_model_back_returns_to_model_menu
+  run_test_back_skips_cli_fixed_values
   run_test_install_script
   run_test_install_script_from_stdin
   run_test_uninstall_script

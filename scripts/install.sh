@@ -6,7 +6,7 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
 REPO_ROOT=""
 LOCAL_SOURCE=""
-EMBEDDED_VERSION="v0.1.3"
+EMBEDDED_VERSION="v0.1.4"
 
 if [[ -n "$SCRIPT_SOURCE" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -60,10 +60,6 @@ ensure_dependencies() {
   if ! command -v codex >/dev/null 2>&1; then
     echo "未找到 codex，请先安装 Codex CLI" >&2
     exit 1
-  fi
-
-  if ! command -v fzf >/dev/null 2>&1; then
-    echo "提示: 未检测到 fzf，安装后将自动回退到基础选择菜单"
   fi
 }
 

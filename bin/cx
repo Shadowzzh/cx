@@ -16,6 +16,10 @@ MODEL_OPTIONS=(
   "custom"
 )
 
+PICK_BACK="__CX_BACK__"
+PICK_CANCELLED="__CX_CANCELLED__"
+BACK_OPTION_LABEL="返回上一步"
+
 # ---- Help ----
 print_help() {
   cat <<'EOF'
@@ -41,61 +45,10 @@ print_help() {
 
 说明:
   - 传了什么参数，就跳过对应的菜单
+  - 交互菜单里输入 `b` 或 `back` 可返回上一步
   - `yolo` 实际映射到 `--dangerously-bypass-approvals-and-sandbox`
   - 未识别的参数会原样透传给 `codex`
 EOF
-}
-
-# ---- Utilities ----
-has_fzf() {
-  command -v fzf >/dev/null 2>&1
-}
-
-build_fzf_args() {
-  FZF_ARGS=()
-  FZF_ENV_DEFAULT_OPTS=""
-  FZF_ENV_DEFAULT_OPTS_FILE=""
-
-  if [[ "${CX_FZF_INHERIT_ALL:-0}" == "1" ]]; then
-    if [[ -n "${FZF_DEFAULT_OPTS:-}" ]]; then
-      eval "FZF_ARGS=($FZF_DEFAULT_OPTS)"
-    fi
-
-    FZF_ENV_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:-}"
-    FZF_ENV_DEFAULT_OPTS_FILE="${FZF_DEFAULT_OPTS_FILE:-}"
-    return 0
-  fi
-
-  if [[ -z "${FZF_DEFAULT_OPTS:-}" ]]; then
-    return 0
-  fi
-
-  local -a raw_args=()
-  local -a sanitized_args=()
-  local arg=""
-  local skip_next="0"
-
-  eval "raw_args=($FZF_DEFAULT_OPTS)"
-
-  for arg in "${raw_args[@]}"; do
-    if [[ "$skip_next" == "1" ]]; then
-      skip_next="0"
-      continue
-    fi
-
-    case "$arg" in
-      --preview)
-        skip_next="1"
-        ;;
-      --preview=*)
-        ;;
-      *)
-        sanitized_args+=("$arg")
-        ;;
-    esac
-  done
-
-  FZF_ARGS=("${sanitized_args[@]}")
 }
 
 is_model_option() {
@@ -112,78 +65,90 @@ is_model_option() {
 }
 
 # ---- Pickers ----
-pick_with_fzf() {
-  local prompt="$1"
-  shift
-
-  build_fzf_args
-
-  local -a cmd
-  cmd=(fzf)
-
-  if ((${#FZF_ARGS[@]} > 0)); then
-    cmd+=("${FZF_ARGS[@]}")
-  fi
-
-  cmd+=(
-    --height=40%
-    --layout=reverse
-    --border
-    --cycle
-    --prompt="${prompt}: "
-  )
-
-  # fzf reads FZF_DEFAULT_OPTS from the child environment even when the
-  # preview flag is not passed on argv, so sanitize the env for text menus.
-  printf '%s\n' "$@" | env \
-    FZF_DEFAULT_OPTS="$FZF_ENV_DEFAULT_OPTS" \
-    FZF_DEFAULT_OPTS_FILE="$FZF_ENV_DEFAULT_OPTS_FILE" \
-    "${cmd[@]}"
-}
-
 pick_with_select() {
   local prompt="$1"
-  shift
+  local allow_back="${2:-0}"
+  shift 2
   local options=("$@")
   local choice=""
 
-  echo "$prompt"
+  if [[ "$allow_back" == "1" ]]; then
+    options+=("$BACK_OPTION_LABEL")
+  fi
+
+  printf '%s\n' "$prompt" >&2
   select choice in "${options[@]}"; do
+    if [[ "$allow_back" == "1" ]]; then
+      case "$REPLY" in
+        b|back)
+          printf '%s\n' "$PICK_BACK"
+          return 0
+          ;;
+      esac
+    fi
+
     if [[ -n "$choice" ]]; then
+      if [[ "$allow_back" == "1" && "$choice" == "$BACK_OPTION_LABEL" ]]; then
+        printf '%s\n' "$PICK_BACK"
+        return 0
+      fi
+
       printf '%s\n' "$choice"
       return 0
     fi
-    echo "无效选择"
+
+    echo "无效选择" >&2
   done
+
+  printf '%s\n' "$PICK_CANCELLED"
 }
 
 pick_one() {
   local prompt="$1"
-  shift
+  local allow_back="${2:-0}"
+  shift 2
 
-  if has_fzf; then
-    pick_with_fzf "$prompt" "$@"
-  else
-    pick_with_select "$prompt" "$@"
-  fi
+  pick_with_select "$prompt" "$allow_back" "$@"
 }
 
 pick_model() {
+  local allow_back="${1:-0}"
   local selected=""
 
-  selected="$(pick_one "Model" "${MODEL_OPTIONS[@]}")" || return 130
+  while true; do
+    selected="$(pick_one "Model" "$allow_back" "${MODEL_OPTIONS[@]}")" || return 130
 
-  if [[ "$selected" == "custom" ]]; then
+    if [[ "$selected" == "$PICK_BACK" || "$selected" == "$PICK_CANCELLED" ]]; then
+      printf '%s\n' "$selected"
+      return 0
+    fi
+
+    if [[ "$selected" != "custom" ]]; then
+      printf '%s\n' "$selected"
+      return 0
+    fi
+
     printf '请输入自定义 model: ' >&2
-    read -r selected
+
+    if ! IFS= read -r selected; then
+      printf '%s\n' "$PICK_CANCELLED"
+      return 0
+    fi
+
+    case "$selected" in
+      b|back)
+        continue
+        ;;
+    esac
 
     if [[ -z "$selected" ]]; then
       echo "model 不能为空" >&2
       return 1
     fi
-  fi
 
-  printf '%s\n' "$selected"
+    printf '%s\n' "$selected"
+    return 0
+  done
 }
 
 # ---- Launch ----
@@ -238,19 +203,73 @@ open_menu() {
   local yolo_state="${2:-}"
   local model="${3:-}"
   local yolo_enabled="0"
+  local -a interactive_steps=()
+  local step_index="0"
+  local allow_back="0"
+  local step=""
+  local result=""
   shift 3
 
   if [[ -z "$reasoning" ]]; then
-    reasoning="$(pick_one "思考等级" "$DEFAULT_REASONING" low medium high xhigh)" || return 130
+    interactive_steps+=("reasoning")
   fi
 
   if [[ -z "$yolo_state" ]]; then
-    yolo_state="$(pick_one "Yolo" "$DEFAULT_YOLO" no)" || return 130
+    interactive_steps+=("yolo")
   fi
 
   if [[ -z "$model" ]]; then
-    model="$(pick_model)" || return 130
+    interactive_steps+=("model")
   fi
+
+  while ((step_index < ${#interactive_steps[@]})); do
+    step="${interactive_steps[$step_index]}"
+    allow_back="0"
+
+    if ((step_index > 0)); then
+      allow_back="1"
+    fi
+
+    case "$step" in
+      reasoning)
+        result="$(pick_one "思考等级" "$allow_back" "$DEFAULT_REASONING" low medium high xhigh)" || return 130
+        ;;
+      yolo)
+        result="$(pick_one "Yolo" "$allow_back" "$DEFAULT_YOLO" no)" || return 130
+        ;;
+      model)
+        result="$(pick_model "$allow_back")" || return 130
+        ;;
+      *)
+        echo "未知菜单步骤: $step" >&2
+        return 1
+        ;;
+    esac
+
+    case "$result" in
+      "$PICK_BACK")
+        ((step_index--))
+        ;;
+      "$PICK_CANCELLED")
+        return 130
+        ;;
+      *)
+        case "$step" in
+          reasoning)
+            reasoning="$result"
+            ;;
+          yolo)
+            yolo_state="$result"
+            ;;
+          model)
+            model="$result"
+            ;;
+        esac
+
+        ((step_index++))
+        ;;
+    esac
+  done
 
   if [[ "$yolo_state" == "yes" ]]; then
     yolo_enabled="1"
