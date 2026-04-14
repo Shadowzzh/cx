@@ -6,6 +6,7 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
 REPO_ROOT=""
 LOCAL_SOURCE=""
+EMBEDDED_VERSION="v0.1.1"
 
 if [[ -n "$SCRIPT_SOURCE" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -83,6 +84,37 @@ ensure_source() {
   printf '%s\n' "$temp_source"
 }
 
+resolve_version() {
+  local version_file=""
+
+  if [[ -n "$REPO_ROOT" ]]; then
+    version_file="$REPO_ROOT/VERSION"
+  fi
+
+  if [[ -n "$version_file" && -f "$version_file" ]]; then
+    head -n 1 "$version_file"
+    return 0
+  fi
+
+  printf '%s\n' "$EMBEDDED_VERSION"
+}
+
+compute_build_id() {
+  local file_path="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file_path" | awk '{print substr($1, 1, 8)}'
+    return 0
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file_path" | awk '{print substr($1, 1, 8)}'
+    return 0
+  fi
+
+  printf '%s\n' "unknown"
+}
+
 write_path_hint() {
   local rc_file="$1"
   local path_line="export PATH=\"$INSTALL_BIN_DIR:\$PATH\""
@@ -111,6 +143,8 @@ main() {
   local source_file=""
   local target_file=""
   local rc_file=""
+  local version=""
+  local build_id=""
 
   while (($# > 0)); do
     case "$1" in
@@ -144,6 +178,8 @@ main() {
   target_file="$INSTALL_BIN_DIR/cx"
   cp "$source_file" "$target_file"
   chmod +x "$target_file"
+  version="$(resolve_version)"
+  build_id="$(compute_build_id "$target_file")"
 
   rc_file="$(detect_rc_file)"
   write_path_hint "$rc_file"
@@ -152,6 +188,7 @@ main() {
     rm -f "$source_file"
   fi
 
+  echo "安装 cx 版本: $version (build $build_id)"
   echo "安装完成: $target_file"
   echo "你现在可以运行: cx"
 }

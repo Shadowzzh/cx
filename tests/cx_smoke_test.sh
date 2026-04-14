@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CX_BIN="$ROOT_DIR/bin/cx"
+CX_VERSION="$(<"$ROOT_DIR/VERSION")"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -204,9 +205,10 @@ EOF
   chmod +x "$temp_dir/fake-bin/codex"
 
   HOME="$temp_dir/home" PATH="$temp_dir/fake-bin:$PATH" \
-    bash "$ROOT_DIR/scripts/install.sh" >/dev/null
+    bash "$ROOT_DIR/scripts/install.sh" >"$temp_dir/stdout.txt"
 
   [[ -x "$temp_dir/home/.local/bin/cx" ]] || fail "install should place cx in ~/.local/bin"
+  assert_contains "$temp_dir/stdout.txt" "安装 cx 版本: $CX_VERSION (build "
 
   rm -rf "$temp_dir"
 }
@@ -227,6 +229,7 @@ EOF
 
   [[ -x "$temp_dir/home/.local/bin/cx" ]] || fail "stdin install should place cx in ~/.local/bin"
   assert_not_contains "$temp_dir/stderr.txt" 'BASH_SOURCE[0]: unbound variable'
+  assert_contains "$temp_dir/stdout.txt" "安装 cx 版本: $CX_VERSION (build "
 
   rm -rf "$temp_dir"
 }
