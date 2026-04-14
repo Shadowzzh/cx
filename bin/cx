@@ -51,6 +51,48 @@ has_fzf() {
   command -v fzf >/dev/null 2>&1
 }
 
+build_fzf_args() {
+  FZF_ARGS=()
+
+  if [[ "${CX_FZF_INHERIT_ALL:-0}" == "1" ]]; then
+    if [[ -n "${FZF_DEFAULT_OPTS:-}" ]]; then
+      eval "FZF_ARGS=($FZF_DEFAULT_OPTS)"
+    fi
+    return 0
+  fi
+
+  if [[ -z "${FZF_DEFAULT_OPTS:-}" ]]; then
+    return 0
+  fi
+
+  local -a raw_args=()
+  local -a sanitized_args=()
+  local arg=""
+  local skip_next="0"
+
+  eval "raw_args=($FZF_DEFAULT_OPTS)"
+
+  for arg in "${raw_args[@]}"; do
+    if [[ "$skip_next" == "1" ]]; then
+      skip_next="0"
+      continue
+    fi
+
+    case "$arg" in
+      --preview)
+        skip_next="1"
+        ;;
+      --preview=*)
+        ;;
+      *)
+        sanitized_args+=("$arg")
+        ;;
+    esac
+  done
+
+  FZF_ARGS=("${sanitized_args[@]}")
+}
+
 is_model_option() {
   local candidate="$1"
   local option
@@ -69,11 +111,24 @@ pick_with_fzf() {
   local prompt="$1"
   shift
 
-  printf '%s\n' "$@" | fzf \
-    --height=40% \
-    --layout=reverse \
-    --border \
+  build_fzf_args
+
+  local -a cmd
+  cmd=(fzf)
+
+  if ((${#FZF_ARGS[@]} > 0)); then
+    cmd+=("${FZF_ARGS[@]}")
+  fi
+
+  cmd+=(
+    --height=40%
+    --layout=reverse
+    --border
+    --cycle
     --prompt="${prompt}: "
+  )
+
+  printf '%s\n' "$@" | "${cmd[@]}"
 }
 
 pick_with_select() {

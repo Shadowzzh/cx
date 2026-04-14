@@ -44,6 +44,10 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${CX_TEST_FZF_ARGS:-}" ]]; then
+  printf '%s\n' "$@" > "$CX_TEST_FZF_ARGS"
+fi
+
 prompt=""
 for arg in "$@"; do
   case "$arg" in
@@ -78,6 +82,15 @@ case "$prompt" in
 esac
 EOF
   chmod +x "$dir/fzf"
+}
+
+assert_line_present() {
+  local file="$1"
+  local expected="$2"
+
+  if ! grep -Fx -- "$expected" "$file" >/dev/null 2>&1; then
+    fail "expected line '$expected' in $file"
+  fi
 }
 
 run_test_direct_launch() {
@@ -193,6 +206,48 @@ run_test_reasoning_and_yolo_prompt_without_passthrough() {
   rm -rf "$temp_dir"
 }
 
+run_test_fzf_ignores_preview_and_enables_cycle() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  : > "$temp_dir/prompts.txt"
+
+  PATH="$temp_dir/bin:$PATH" \
+    FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
+    bash "$CX_BIN" yolo xhigh hello
+
+  assert_line_present "$temp_dir/fzf_args.txt" '--cycle'
+  assert_not_contains "$temp_dir/fzf_args.txt" '--preview'
+  assert_not_contains "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
+
+  rm -rf "$temp_dir"
+}
+
+run_test_fzf_can_inherit_all_opts() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  : > "$temp_dir/prompts.txt"
+
+  PATH="$temp_dir/bin:$PATH" \
+    FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
+    CX_FZF_INHERIT_ALL="1" \
+    bash "$CX_BIN" yolo xhigh hello
+
+  assert_line_present "$temp_dir/fzf_args.txt" '--preview'
+  assert_line_present "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
+
+  rm -rf "$temp_dir"
+}
+
 run_test_install_script() {
   local temp_dir
   temp_dir="$(mktemp -d)"
@@ -254,6 +309,8 @@ main() {
   run_test_model_only_prompt
   run_test_reasoning_and_yolo_prompt
   run_test_reasoning_and_yolo_prompt_without_passthrough
+  run_test_fzf_ignores_preview_and_enables_cycle
+  run_test_fzf_can_inherit_all_opts
   run_test_install_script
   run_test_install_script_from_stdin
   run_test_uninstall_script
