@@ -53,11 +53,16 @@ has_fzf() {
 
 build_fzf_args() {
   FZF_ARGS=()
+  FZF_ENV_DEFAULT_OPTS=""
+  FZF_ENV_DEFAULT_OPTS_FILE=""
 
   if [[ "${CX_FZF_INHERIT_ALL:-0}" == "1" ]]; then
     if [[ -n "${FZF_DEFAULT_OPTS:-}" ]]; then
       eval "FZF_ARGS=($FZF_DEFAULT_OPTS)"
     fi
+
+    FZF_ENV_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:-}"
+    FZF_ENV_DEFAULT_OPTS_FILE="${FZF_DEFAULT_OPTS_FILE:-}"
     return 0
   fi
 
@@ -128,7 +133,12 @@ pick_with_fzf() {
     --prompt="${prompt}: "
   )
 
-  printf '%s\n' "$@" | "${cmd[@]}"
+  # fzf reads FZF_DEFAULT_OPTS from the child environment even when the
+  # preview flag is not passed on argv, so sanitize the env for text menus.
+  printf '%s\n' "$@" | env \
+    FZF_DEFAULT_OPTS="$FZF_ENV_DEFAULT_OPTS" \
+    FZF_DEFAULT_OPTS_FILE="$FZF_ENV_DEFAULT_OPTS_FILE" \
+    "${cmd[@]}"
 }
 
 pick_with_select() {

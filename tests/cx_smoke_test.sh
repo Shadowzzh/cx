@@ -48,6 +48,13 @@ if [[ -n "${CX_TEST_FZF_ARGS:-}" ]]; then
   printf '%s\n' "$@" > "$CX_TEST_FZF_ARGS"
 fi
 
+if [[ -n "${CX_TEST_FZF_ENV:-}" ]]; then
+  {
+    printf 'FZF_DEFAULT_OPTS=%s\n' "${FZF_DEFAULT_OPTS-<unset>}"
+    printf 'FZF_DEFAULT_OPTS_FILE=%s\n' "${FZF_DEFAULT_OPTS_FILE-<unset>}"
+  } > "$CX_TEST_FZF_ENV"
+fi
+
 prompt=""
 for arg in "$@"; do
   case "$arg" in
@@ -212,17 +219,22 @@ run_test_fzf_ignores_preview_and_enables_cycle() {
 
   make_fake_commands "$temp_dir/bin"
   : > "$temp_dir/prompts.txt"
+  : > "$temp_dir/fzfrc"
 
   PATH="$temp_dir/bin:$PATH" \
     FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
+    FZF_DEFAULT_OPTS_FILE="$temp_dir/fzfrc" \
     CX_TEST_OUTPUT="$temp_dir/output.txt" \
     CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
     CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
+    CX_TEST_FZF_ENV="$temp_dir/fzf_env.txt" \
     bash "$CX_BIN" yolo xhigh hello
 
   assert_line_present "$temp_dir/fzf_args.txt" '--cycle'
   assert_not_contains "$temp_dir/fzf_args.txt" '--preview'
   assert_not_contains "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
+  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS='
+  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS_FILE='
 
   rm -rf "$temp_dir"
 }
@@ -233,17 +245,22 @@ run_test_fzf_can_inherit_all_opts() {
 
   make_fake_commands "$temp_dir/bin"
   : > "$temp_dir/prompts.txt"
+  : > "$temp_dir/fzfrc"
 
   PATH="$temp_dir/bin:$PATH" \
     FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
+    FZF_DEFAULT_OPTS_FILE="$temp_dir/fzfrc" \
     CX_TEST_OUTPUT="$temp_dir/output.txt" \
     CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
     CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
+    CX_TEST_FZF_ENV="$temp_dir/fzf_env.txt" \
     CX_FZF_INHERIT_ALL="1" \
     bash "$CX_BIN" yolo xhigh hello
 
   assert_line_present "$temp_dir/fzf_args.txt" '--preview'
   assert_line_present "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
+  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS=--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"'
+  assert_line_present "$temp_dir/fzf_env.txt" "FZF_DEFAULT_OPTS_FILE=$temp_dir/fzfrc"
 
   rm -rf "$temp_dir"
 }
