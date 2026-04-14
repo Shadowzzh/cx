@@ -1,0 +1,38 @@
+name: smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          bash -n bin/cx
+          bash -n scripts/install.sh
+          bash -n scripts/uninstall.sh
+          bash -n tests/cx_smoke_test.sh
+
+      - name: Run smoke tests
+        run: |
+          bash tests/cx_smoke_test.sh

@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DEFAULT_MODEL="${CX_DEFAULT_MODEL:-gpt-5.4}"
+DEFAULT_REASONING="${CX_DEFAULT_REASONING:-medium}"
+DEFAULT_YOLO="${CX_DEFAULT_YOLO:-yes}"
+
+MODEL_OPTIONS=(
+  "gpt-5.4"
+  "gpt-5.3-codex"
+  "gpt-5.2-codex"
+  "gpt-5.1-codex-max"
+  "gpt-5.2"
+  "gpt-5.1-codex-mini"
+  "custom"
+)
+
+# ---- Help ----
+print_help() {
+  cat <<'EOF'
+用法:
+  cx                    打开交互式启动菜单
+  cx menu               强制打开交互式启动菜单
+  cx low                直接使用 low 思考等级启动
+  cx medium             直接使用 medium 思考等级启动
+  cx high               直接使用 high 思考等级启动
+  cx yolo               跳过 yolo 选择，默认开启 yolo
+  cx no-yolo            跳过 yolo 选择，并显式关闭 yolo
+  cx gpt-5.4            跳过 model 选择
+  cx xhigh yolo         直接使用 xhigh + yolo 启动
+  cx low --model o3     使用自定义 model 启动
+  cx --help             查看帮助
+
+----
+
+默认值:
+  - 思考等级: `medium`
+  - yolo: `yes`
+  - model: `gpt-5.4`
+
+说明:
+  - 传了什么参数，就跳过对应的菜单
+  - `yolo` 实际映射到 `--dangerously-bypass-approvals-and-sandbox`
+  - 未识别的参数会原样透传给 `codex`
+EOF
+}
+
+# ---- Utilities ----
+has_fzf() {
+  command -v fzf >/dev/null 2>&1
+}
+
+is_model_option() {
+  local candidate="$1"
+  local option
+
+  for option in "${MODEL_OPTIONS[@]}"; do
+    if [[ "$candidate" == "$option" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# ---- Pickers ----
+pick_with_fzf() {
+  local prompt="$1"
+  shift
+
+  printf '%s\n' "$@" | fzf \
+    --height=40% \
+    --layout=reverse \
+    --border \
+    --prompt="${prompt}: "
+}
+
+pick_with_select() {
+  local prompt="$1"
+  shift
+  local options=("$@")
+  local choice=""
+
+  echo "$prompt"
+  select choice in "${options[@]}"; do
+    if [[ -n "$choice" ]]; then
+      printf '%s\n' "$choice"
+      return 0
+    fi
+    echo "无效选择"
+  done
+}
+
+pick_one() {
+  local prompt="$1"
+  shift
+
+  if has_fzf; then
+    pick_with_fzf "$prompt" "$@"
+  else
+    pick_with_select "$prompt" "$@"
+  fi
+}
+
+pick_model() {
+  local selected=""
+
+  selected="$(pick_one "Model" "${MODEL_OPTIONS[@]}")" || return 130
+
+  if [[ "$selected" == "custom" ]]; then
+    printf '请输入自定义 model: ' >&2
+    read -r selected
+
+    if [[ -z "$selected" ]]; then
+      echo "model 不能为空" >&2
+      return 1
+    fi
+  fi
+
+  printf '%s\n' "$selected"
+}
+
+# ---- Launch ----
+launch_codex() {
+  local reasoning="$1"
+  local yolo_enabled="$2"
+  local model="$3"
+  local effort=""
+  shift 3
+
+  case "$reasoning" in
+    low)
+      effort="low"
+      ;;
+    medium)
+      effort="medium"
+      ;;
+    high)
+      effort="high"
+      ;;
+    xhigh)
+      effort="extra-high"
+      ;;
+    *)
+      echo "不支持的思考等级: $reasoning" >&2
+      return 1
+      ;;
+  esac
+
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "未找到 codex，请先安装 Codex CLI" >&2
+    return 1
+  fi
+
+  local -a cmd
+  cmd=(codex --model "$model" -c "model_reasoning_effort=\"$effort\"")
+
+  if [[ "$yolo_enabled" == "1" ]]; then
+    cmd+=(--dangerously-bypass-approvals-and-sandbox)
+  fi
+
+  if (($# > 0)); then
+    cmd+=("$@")
+  fi
+
+  exec "${cmd[@]}"
+}
+
+# ---- Dynamic menus ----
+open_menu() {
+  local reasoning="${1:-}"
+  local yolo_state="${2:-}"
+  local model="${3:-}"
+  local yolo_enabled="0"
+  shift 3
+
+  if [[ -z "$reasoning" ]]; then
+    reasoning="$(pick_one "思考等级" "$DEFAULT_REASONING" low medium high xhigh)" || return 130
+  fi
+
+  if [[ -z "$yolo_state" ]]; then
+    yolo_state="$(pick_one "Yolo" "$DEFAULT_YOLO" no)" || return 130
+  fi
+
+  if [[ -z "$model" ]]; then
+    model="$(pick_model)" || return 130
+  fi
+
+  if [[ "$yolo_state" == "yes" ]]; then
+    yolo_enabled="1"
+  fi
+
+  launch_codex "$reasoning" "$yolo_enabled" "$model" "$@"
+}
+
+# ---- Main ----
+main() {
+  local reasoning=""
+  local yolo_state=""
+  local model=""
+  local menu_mode="0"
+  local yolo_enabled="0"
+  local -a passthrough=()
+
+  while (($# > 0)); do
+    case "$1" in
+      low|medium|high|xhigh)
+        reasoning="$1"
+        shift
+        ;;
+      yolo)
+        yolo_state="yes"
+        shift
+        ;;
+      no-yolo)
+        yolo_state="no"
+        shift
+        ;;
+      menu)
+        menu_mode="1"
+        shift
+        ;;
+      -m|--model)
+        if (($# < 2)); then
+          echo "$1 缺少值" >&2
+          return 1
+        fi
+        model="$2"
+        shift 2
+        ;;
+      --model=*)
+        model="${1#--model=}"
+        shift
+        ;;
+      -h|--help)
+        print_help
+        return 0
+        ;;
+      --)
+        shift
+        passthrough+=("$@")
+        break
+        ;;
+      *)
+        if is_model_option "$1"; then
+          model="$1"
+        else
+          passthrough+=("$1")
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -n "$reasoning" && -n "$yolo_state" && -n "$model" && "$menu_mode" != "1" ]]; then
+    if [[ "$yolo_state" == "yes" ]]; then
+      yolo_enabled="1"
+    fi
+    launch_codex "$reasoning" "$yolo_enabled" "$model" "${passthrough[@]}"
+    return 0
+  fi
+
+  open_menu "$reasoning" "$yolo_state" "$model" "${passthrough[@]}"
+}
+
+main "$@"
