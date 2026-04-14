@@ -92,7 +92,7 @@ run_test_direct_launch() {
     bash "$CX_BIN" yolo xhigh gpt-5.4 hello
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
-  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="extra-high"'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
   assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
   assert_contains "$temp_dir/output.txt" 'hello'
 
@@ -116,7 +116,7 @@ run_test_model_only_prompt() {
     bash "$CX_BIN" yolo xhigh hello
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.2-codex'
-  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="extra-high"'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
   assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
   assert_contains "$temp_dir/prompts.txt" 'Model: '
   assert_not_contains "$temp_dir/prompts.txt" '思考等级: '

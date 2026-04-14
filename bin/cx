@@ -140,7 +140,7 @@ launch_codex() {
       effort="high"
       ;;
     xhigh)
-      effort="extra-high"
+      effort="xhigh"
       ;;
     *)
       echo "不支持的思考等级: $reasoning" >&2
