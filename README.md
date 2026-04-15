@@ -4,7 +4,7 @@
 
 **为 Codex CLI 提供更顺手的交互式启动器**
 
-<img src="./docs/cover.svg" alt="cx cover" width="300" />
+<img src="./docs/logo.svg" alt="cx cover" width="300" />
 
 一条命令启动，动态补全参数，减少重复输入
 
@@ -17,6 +17,10 @@
 ## 简介
 
 cx 是一个轻量级命令行启动器，用来简化 Codex CLI 的启动流程。
+
+<p align="center">
+  <img src="./docs/demo.gif" alt="cx terminal demo" width="720" />
+</p>
 
 ### 功能特性
 
@@ -48,6 +52,16 @@ curl -fsSL https://raw.githubusercontent.com/Shadowzzh/cx/main/scripts/install.s
 git clone https://github.com/Shadowzzh/cx.git
 cd cx
 bash scripts/install.sh
+```
+
+### 卸载
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Shadowzzh/cx/main/scripts/uninstall.sh | bash
+```
+
+```bash
+bash scripts/uninstall.sh
 ```
 
 ## 使用
@@ -112,7 +126,8 @@ cx no-yolo high
 ├── tests/
 │   └── cx_smoke_test.sh
 ├── docs/
-│   └── cover.svg
+│   ├── demo.gif
+│   └── logo.svg
 └── .github/
     └── workflows/
         └── smoke.yml
