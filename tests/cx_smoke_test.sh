@@ -29,6 +29,19 @@ assert_not_contains() {
   fi
 }
 
+assert_count() {
+  local file="$1"
+  local expected_text="$2"
+  local expected_count="$3"
+  local actual_count
+
+  actual_count="$(grep -Fxc -- "$expected_text" "$file" || true)"
+
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    fail "expected '$expected_text' to appear $expected_count times in $file, got $actual_count"
+  fi
+}
+
 assert_file_empty() {
   local file="$1"
 
@@ -124,7 +137,7 @@ run_test_reasoning_and_yolo_prompt() {
 
   make_fake_commands "$temp_dir/bin"
 
-  run_cx "$temp_dir" $'4\n2' gpt-5.4 hello
+  run_cx "$temp_dir" $'3\n2' gpt-5.4 hello
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="high"'
@@ -142,7 +155,7 @@ run_test_reasoning_and_yolo_prompt_without_passthrough() {
 
   make_fake_commands "$temp_dir/bin"
 
-  run_cx "$temp_dir" $'4\n2' gpt-5.4
+  run_cx "$temp_dir" $'3\n2' gpt-5.4
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="high"'
@@ -175,7 +188,7 @@ run_test_back_with_menu_item() {
 
   make_fake_commands "$temp_dir/bin"
 
-  run_cx "$temp_dir" $'5\n2\n8\n1\n1'
+  run_cx "$temp_dir" $'4\n2\n8\n1\n1'
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
@@ -206,12 +219,54 @@ run_test_back_skips_cli_fixed_values() {
 
   make_fake_commands "$temp_dir/bin"
 
-  run_cx "$temp_dir" $'4\nb\n5\n1' yolo
+  run_cx "$temp_dir" $'3\nb\n4\n1' yolo
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
   assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
   assert_not_contains "$temp_dir/transcript.txt" 'Yolo'
+
+  rm -rf "$temp_dir"
+}
+
+run_test_reasoning_menu_deduplicates_default_option() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+
+  PATH="$temp_dir/bin:/usr/bin:/bin" \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    bash "$CX_BIN" gpt-5.4 >"$temp_dir/transcript.txt" 2>&1 <<'EOF'
+1
+1
+EOF
+
+  assert_count "$temp_dir/transcript.txt" '1) medium' 1
+  assert_count "$temp_dir/transcript.txt" '2) low' 1
+  assert_count "$temp_dir/transcript.txt" '3) high' 1
+  assert_count "$temp_dir/transcript.txt" '4) xhigh' 1
+  assert_not_contains "$temp_dir/transcript.txt" '3) medium'
+
+  rm -rf "$temp_dir"
+}
+
+run_test_yolo_menu_deduplicates_default_option() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+
+  PATH="$temp_dir/bin:/usr/bin:/bin" \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    CX_DEFAULT_YOLO=no \
+    bash "$CX_BIN" medium gpt-5.4 >"$temp_dir/transcript.txt" 2>&1 <<'EOF'
+1
+EOF
+
+  assert_count "$temp_dir/transcript.txt" '1) no' 1
+  assert_count "$temp_dir/transcript.txt" '2) yes' 1
+  assert_not_contains "$temp_dir/transcript.txt" '2) no'
 
   rm -rf "$temp_dir"
 }
@@ -283,6 +338,8 @@ main() {
   run_test_back_with_menu_item
   run_test_custom_model_back_returns_to_model_menu
   run_test_back_skips_cli_fixed_values
+  run_test_reasoning_menu_deduplicates_default_option
+  run_test_yolo_menu_deduplicates_default_option
   run_test_install_script
   run_test_install_script_from_stdin
   run_test_uninstall_script

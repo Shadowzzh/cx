@@ -111,6 +111,25 @@ pick_one() {
   pick_with_select "$prompt" "$allow_back" "$@"
 }
 
+pick_default_first() {
+  local prompt="$1"
+  local allow_back="$2"
+  local preferred="$3"
+  shift 3
+  local -a options=("$preferred")
+  local option=""
+
+  for option in "$@"; do
+    if [[ "$option" == "$preferred" ]]; then
+      continue
+    fi
+
+    options+=("$option")
+  done
+
+  pick_one "$prompt" "$allow_back" "${options[@]}"
+}
+
 pick_model() {
   local allow_back="${1:-0}"
   local selected=""
@@ -232,10 +251,10 @@ open_menu() {
 
     case "$step" in
       reasoning)
-        result="$(pick_one "思考等级" "$allow_back" "$DEFAULT_REASONING" low medium high xhigh)" || return 130
+        result="$(pick_default_first "思考等级" "$allow_back" "$DEFAULT_REASONING" low medium high xhigh)" || return 130
         ;;
       yolo)
-        result="$(pick_one "Yolo" "$allow_back" "$DEFAULT_YOLO" no)" || return 130
+        result="$(pick_default_first "Yolo" "$allow_back" "$DEFAULT_YOLO" yes no)" || return 130
         ;;
       model)
         result="$(pick_model "$allow_back")" || return 130

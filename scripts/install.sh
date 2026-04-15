@@ -6,7 +6,7 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
 REPO_ROOT=""
 LOCAL_SOURCE=""
-EMBEDDED_VERSION="v0.1.4"
+EMBEDDED_VERSION="v0.1.5"
 
 if [[ -n "$SCRIPT_SOURCE" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
