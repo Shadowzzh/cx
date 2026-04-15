@@ -45,10 +45,63 @@ print_help() {
 
 说明:
   - 传了什么参数，就跳过对应的菜单
-  - 交互菜单里输入 `b` 或 `back` 可返回上一步
+  - 检测到 `fzf` 时默认启用增强交互，否则回退到基础菜单
+  - 基础菜单里输入 `b` 或 `back` 可返回上一步
+  - `fzf` 菜单里按 `ctrl-b` 或选择 `返回上一步` 可返回上一步
   - `yolo` 实际映射到 `--dangerously-bypass-approvals-and-sandbox`
   - 未识别的参数会原样透传给 `codex`
 EOF
+}
+
+has_fzf() {
+  command -v fzf >/dev/null 2>&1
+}
+
+build_fzf_args() {
+  FZF_ARGS=()
+  FZF_ENV_DEFAULT_OPTS=""
+  FZF_ENV_DEFAULT_OPTS_FILE=""
+
+  if [[ "${CX_FZF_INHERIT_ALL:-0}" == "1" ]]; then
+    if [[ -n "${FZF_DEFAULT_OPTS:-}" ]]; then
+      eval "FZF_ARGS=($FZF_DEFAULT_OPTS)"
+    fi
+
+    FZF_ENV_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:-}"
+    FZF_ENV_DEFAULT_OPTS_FILE="${FZF_DEFAULT_OPTS_FILE:-}"
+    return 0
+  fi
+
+  if [[ -z "${FZF_DEFAULT_OPTS:-}" ]]; then
+    return 0
+  fi
+
+  local -a raw_args=()
+  local -a sanitized_args=()
+  local arg=""
+  local skip_next="0"
+
+  eval "raw_args=($FZF_DEFAULT_OPTS)"
+
+  for arg in "${raw_args[@]}"; do
+    if [[ "$skip_next" == "1" ]]; then
+      skip_next="0"
+      continue
+    fi
+
+    case "$arg" in
+      --preview)
+        skip_next="1"
+        ;;
+      --preview=*)
+        ;;
+      *)
+        sanitized_args+=("$arg")
+        ;;
+    esac
+  done
+
+  FZF_ARGS=("${sanitized_args[@]}")
 }
 
 is_model_option() {
@@ -65,6 +118,79 @@ is_model_option() {
 }
 
 # ---- Pickers ----
+pick_with_fzf() {
+  local prompt="$1"
+  local allow_back="${2:-0}"
+  shift 2
+  local options=("$@")
+  local output=""
+  local selected=""
+  local key=""
+  local -a cmd
+
+  if [[ "$allow_back" == "1" ]]; then
+    options+=("$BACK_OPTION_LABEL")
+  fi
+
+  build_fzf_args
+
+  cmd=(fzf)
+
+  if ((${#FZF_ARGS[@]} > 0)); then
+    cmd+=("${FZF_ARGS[@]}")
+  fi
+
+  cmd+=(
+    --height=40%
+    --layout=reverse
+    --border
+    --cycle
+    --prompt="${prompt}: "
+  )
+
+  if [[ "$allow_back" == "1" ]]; then
+    cmd+=(--expect=ctrl-b)
+  fi
+
+  if ! output="$(printf '%s\n' "${options[@]}" | env \
+    FZF_DEFAULT_OPTS="$FZF_ENV_DEFAULT_OPTS" \
+    FZF_DEFAULT_OPTS_FILE="$FZF_ENV_DEFAULT_OPTS_FILE" \
+    "${cmd[@]}")"; then
+    printf '%s\n' "$PICK_CANCELLED"
+    return 0
+  fi
+
+  if [[ "$allow_back" == "1" ]]; then
+    if [[ "$output" == *$'\n'* ]]; then
+      key="${output%%$'\n'*}"
+      selected="${output#*$'\n'}"
+    elif [[ "$output" == "ctrl-b" ]]; then
+      key="ctrl-b"
+    else
+      selected="$output"
+    fi
+
+    if [[ "$key" == "ctrl-b" ]]; then
+      printf '%s\n' "$PICK_BACK"
+      return 0
+    fi
+  else
+    selected="$output"
+  fi
+
+  if [[ -z "$selected" ]]; then
+    printf '%s\n' "$PICK_CANCELLED"
+    return 0
+  fi
+
+  if [[ "$allow_back" == "1" && "$selected" == "$BACK_OPTION_LABEL" ]]; then
+    printf '%s\n' "$PICK_BACK"
+    return 0
+  fi
+
+  printf '%s\n' "$selected"
+}
+
 pick_with_select() {
   local prompt="$1"
   local allow_back="${2:-0}"
@@ -107,6 +233,11 @@ pick_one() {
   local prompt="$1"
   local allow_back="${2:-0}"
   shift 2
+
+  if has_fzf; then
+    pick_with_fzf "$prompt" "$allow_back" "$@"
+    return 0
+  fi
 
   pick_with_select "$prompt" "$allow_back" "$@"
 }

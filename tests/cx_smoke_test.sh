@@ -42,6 +42,15 @@ assert_count() {
   fi
 }
 
+assert_line_present() {
+  local file="$1"
+  local expected="$2"
+
+  if ! grep -Fx -- "$expected" "$file" >/dev/null 2>&1; then
+    fail "expected line '$expected' in $file"
+  fi
+}
+
 assert_file_empty() {
   local file="$1"
 
@@ -60,6 +69,73 @@ make_fake_commands() {
 printf '%s\n' "$*" > "${CX_TEST_OUTPUT:?}"
 EOF
   chmod +x "$dir/codex"
+}
+
+make_fake_fzf() {
+  local dir="$1"
+
+  cat > "$dir/fzf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${CX_TEST_FZF_ARGS:-}" ]]; then
+  printf '%s\n' "$@" > "$CX_TEST_FZF_ARGS"
+fi
+
+if [[ -n "${CX_TEST_FZF_ENV:-}" ]]; then
+  {
+    printf 'FZF_DEFAULT_OPTS=%s\n' "${FZF_DEFAULT_OPTS-<unset>}"
+    printf 'FZF_DEFAULT_OPTS_FILE=%s\n' "${FZF_DEFAULT_OPTS_FILE-<unset>}"
+  } > "$CX_TEST_FZF_ENV"
+fi
+
+prompt=""
+for arg in "$@"; do
+  case "$arg" in
+    --prompt=*)
+      prompt="${arg#--prompt=}"
+      ;;
+  esac
+done
+
+if [[ -n "${CX_TEST_PROMPTS:-}" ]]; then
+  printf '%s\n' "$prompt" >> "$CX_TEST_PROMPTS"
+fi
+
+if [[ -n "${CX_TEST_FZF_OPTIONS:-}" ]]; then
+  while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$CX_TEST_FZF_OPTIONS"
+  done
+else
+  while IFS= read -r _line; do
+    :
+  done
+fi
+
+counter_file="${CX_TEST_FZF_COUNTER:?}"
+call_index="1"
+
+if [[ -f "$counter_file" ]]; then
+  call_index="$(( $(cat "$counter_file") + 1 ))"
+fi
+
+printf '%s\n' "$call_index" > "$counter_file"
+
+response_file="${CX_TEST_FZF_STATE_DIR:?}/${call_index}.out"
+status_file="${CX_TEST_FZF_STATE_DIR:?}/${call_index}.status"
+exit_code="0"
+
+if [[ -f "$status_file" ]]; then
+  exit_code="$(cat "$status_file")"
+fi
+
+if [[ -f "$response_file" ]]; then
+  cat "$response_file"
+fi
+
+exit "$exit_code"
+EOF
+  chmod +x "$dir/fzf"
 }
 
 run_cx() {
@@ -271,6 +347,134 @@ EOF
   rm -rf "$temp_dir"
 }
 
+run_test_fzf_backend_selects_values() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  make_fake_fzf "$temp_dir/bin"
+  mkdir -p "$temp_dir/fzf-state"
+  : > "$temp_dir/prompts.txt"
+
+  cat > "$temp_dir/fzf-state/1.out" <<'EOF'
+high
+EOF
+  cat > "$temp_dir/fzf-state/2.out" <<'EOF'
+
+no
+EOF
+
+  env \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    CX_TEST_FZF_COUNTER="$temp_dir/fzf-counter.txt" \
+    CX_TEST_FZF_STATE_DIR="$temp_dir/fzf-state" \
+    bash -c '
+      PATH="$1/bin:/usr/bin:/bin" \
+        CX_TEST_OUTPUT="$1/output.txt" \
+        CX_TEST_PROMPTS="$2" \
+        CX_TEST_FZF_COUNTER="$3" \
+        CX_TEST_FZF_STATE_DIR="$4" \
+        bash "$5" gpt-5.4 hello >"$1/transcript.txt" 2>&1
+    ' _ "$temp_dir" "$temp_dir/prompts.txt" "$temp_dir/fzf-counter.txt" "$temp_dir/fzf-state" "$CX_BIN"
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="high"'
+  assert_not_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+  assert_line_present "$temp_dir/prompts.txt" '思考等级: '
+  assert_line_present "$temp_dir/prompts.txt" 'Yolo: '
+
+  rm -rf "$temp_dir"
+}
+
+run_test_fzf_backend_supports_ctrl_b_back() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  make_fake_fzf "$temp_dir/bin"
+  mkdir -p "$temp_dir/fzf-state"
+  : > "$temp_dir/prompts.txt"
+
+  cat > "$temp_dir/fzf-state/1.out" <<'EOF'
+xhigh
+EOF
+  cat > "$temp_dir/fzf-state/2.out" <<'EOF'
+ctrl-b
+EOF
+  cat > "$temp_dir/fzf-state/3.out" <<'EOF'
+low
+EOF
+  cat > "$temp_dir/fzf-state/4.out" <<'EOF'
+
+yes
+EOF
+
+  env \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    CX_TEST_FZF_COUNTER="$temp_dir/fzf-counter.txt" \
+    CX_TEST_FZF_STATE_DIR="$temp_dir/fzf-state" \
+    bash -c '
+      PATH="$1/bin:/usr/bin:/bin" \
+        CX_TEST_OUTPUT="$1/output.txt" \
+        CX_TEST_PROMPTS="$2" \
+        CX_TEST_FZF_COUNTER="$3" \
+        CX_TEST_FZF_STATE_DIR="$4" \
+        bash "$5" gpt-5.4 >"$1/transcript.txt" 2>&1
+    ' _ "$temp_dir" "$temp_dir/prompts.txt" "$temp_dir/fzf-counter.txt" "$temp_dir/fzf-state" "$CX_BIN"
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="low"'
+  assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+  assert_count "$temp_dir/prompts.txt" '思考等级: ' 2
+  assert_count "$temp_dir/prompts.txt" 'Yolo: ' 2
+
+  rm -rf "$temp_dir"
+}
+
+run_test_fzf_ignores_preview_and_enables_cycle() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  make_fake_fzf "$temp_dir/bin"
+  mkdir -p "$temp_dir/fzf-state"
+  : > "$temp_dir/prompts.txt"
+  : > "$temp_dir/fzfrc"
+
+  cat > "$temp_dir/fzf-state/1.out" <<'EOF'
+gpt-5.2-codex
+EOF
+
+  env \
+    FZF_DEFAULT_OPTS='--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' \
+    FZF_DEFAULT_OPTS_FILE="$temp_dir/fzfrc" \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    CX_TEST_FZF_ARGS="$temp_dir/fzf_args.txt" \
+    CX_TEST_FZF_ENV="$temp_dir/fzf_env.txt" \
+    CX_TEST_FZF_COUNTER="$temp_dir/fzf-counter.txt" \
+    CX_TEST_FZF_STATE_DIR="$temp_dir/fzf-state" \
+    bash -c '
+      PATH="$1/bin:/usr/bin:/bin" \
+        CX_TEST_OUTPUT="$1/output.txt" \
+        FZF_DEFAULT_OPTS="$2" \
+        FZF_DEFAULT_OPTS_FILE="$3" \
+        CX_TEST_PROMPTS="$4" \
+        CX_TEST_FZF_ARGS="$5" \
+        CX_TEST_FZF_ENV="$6" \
+        CX_TEST_FZF_COUNTER="$7" \
+        CX_TEST_FZF_STATE_DIR="$8" \
+        bash "$9" yolo xhigh hello >"$1/transcript.txt" 2>&1
+    ' _ "$temp_dir" '--height 60% --layout=reverse --border --preview "bat --color=always --line-range :100 {}"' "$temp_dir/fzfrc" "$temp_dir/prompts.txt" "$temp_dir/fzf_args.txt" "$temp_dir/fzf_env.txt" "$temp_dir/fzf-counter.txt" "$temp_dir/fzf-state" "$CX_BIN"
+
+  assert_line_present "$temp_dir/fzf_args.txt" '--cycle'
+  assert_not_contains "$temp_dir/fzf_args.txt" '--preview'
+  assert_not_contains "$temp_dir/fzf_args.txt" 'bat --color=always --line-range :100 {}'
+  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS='
+  assert_line_present "$temp_dir/fzf_env.txt" 'FZF_DEFAULT_OPTS_FILE='
+
+  rm -rf "$temp_dir"
+}
+
 run_test_install_script() {
   local temp_dir
   temp_dir="$(mktemp -d)"
@@ -340,6 +544,9 @@ main() {
   run_test_back_skips_cli_fixed_values
   run_test_reasoning_menu_deduplicates_default_option
   run_test_yolo_menu_deduplicates_default_option
+  run_test_fzf_backend_selects_values
+  run_test_fzf_backend_supports_ctrl_b_back
+  run_test_fzf_ignores_preview_and_enables_cycle
   run_test_install_script
   run_test_install_script_from_stdin
   run_test_uninstall_script
