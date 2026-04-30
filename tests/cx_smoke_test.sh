@@ -221,7 +221,7 @@ run_test_model_only_prompt() {
 
   run_cx "$temp_dir" $'2' yolo xhigh hello
 
-  assert_contains "$temp_dir/output.txt" '--model gpt-5.3-codex'
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.5'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
   assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
   assert_contains "$temp_dir/transcript.txt" 'Model'
@@ -288,7 +288,7 @@ run_test_back_with_menu_item() {
 
   make_fake_commands "$temp_dir/bin"
 
-  run_cx "$temp_dir" $'4\n2\n8\n1\n1'
+  run_cx "$temp_dir" $'4\n2\n9\n1\n1'
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.4'
   assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
@@ -304,7 +304,7 @@ run_test_custom_model_back_returns_to_model_menu() {
 
   make_fake_commands "$temp_dir/bin"
 
-  run_cx "$temp_dir" $'1\n1\n7\nb\n2'
+  run_cx "$temp_dir" $'1\n1\n8\nb\n3'
 
   assert_contains "$temp_dir/output.txt" '--model gpt-5.3-codex'
   assert_not_contains "$temp_dir/output.txt" '--model b'
