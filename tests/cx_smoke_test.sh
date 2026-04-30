@@ -189,6 +189,30 @@ run_test_direct_launch_without_passthrough() {
   rm -rf "$temp_dir"
 }
 
+run_test_direct_launch_with_gpt_5_5() {
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+
+  make_fake_commands "$temp_dir/bin"
+  : > "$temp_dir/prompts.txt"
+
+  PATH="$temp_dir/bin:$PATH" \
+    CX_TEST_OUTPUT="$temp_dir/output.txt" \
+    CX_TEST_PROMPTS="$temp_dir/prompts.txt" \
+    bash "$CX_BIN" yolo xhigh gpt-5.5 hello
+
+  assert_contains "$temp_dir/output.txt" '--model gpt-5.5'
+  assert_contains "$temp_dir/output.txt" 'model_reasoning_effort="xhigh"'
+  assert_contains "$temp_dir/output.txt" '--dangerously-bypass-approvals-and-sandbox'
+  assert_contains "$temp_dir/output.txt" 'hello'
+
+  if [[ -s "$temp_dir/prompts.txt" ]]; then
+    fail "gpt-5.5 direct launch should not open any menu"
+  fi
+
+  rm -rf "$temp_dir"
+}
+
 run_test_model_only_prompt() {
   local temp_dir
   temp_dir="$(mktemp -d)"
@@ -535,6 +559,7 @@ run_test_uninstall_script() {
 main() {
   run_test_direct_launch
   run_test_direct_launch_without_passthrough
+  run_test_direct_launch_with_gpt_5_5
   run_test_model_only_prompt
   run_test_reasoning_and_yolo_prompt
   run_test_reasoning_and_yolo_prompt_without_passthrough

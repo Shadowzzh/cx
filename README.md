@@ -71,6 +71,7 @@ bash scripts/uninstall.sh
 ```bash
 cx
 cx yolo
+cx gpt-5.5
 cx xhigh
 cx gpt-5.4
 cx yolo xhigh
@@ -106,6 +107,7 @@ cx no-yolo high
 
 ### 支持的 model
 
+- `gpt-5.5`
 - `gpt-5.4`
 - `gpt-5.3-codex`
 - `gpt-5.2-codex`

@@ -7,6 +7,7 @@ DEFAULT_REASONING="${CX_DEFAULT_REASONING:-medium}"
 DEFAULT_YOLO="${CX_DEFAULT_YOLO:-yes}"
 
 MODEL_OPTIONS=(
+  "gpt-5.5"
   "gpt-5.4"
   "gpt-5.3-codex"
   "gpt-5.2-codex"
@@ -31,6 +32,7 @@ print_help() {
   cx high               直接使用 high 思考等级启动
   cx yolo               跳过 yolo 选择，默认开启 yolo
   cx no-yolo            跳过 yolo 选择，并显式关闭 yolo
+  cx gpt-5.5            跳过 model 选择
   cx gpt-5.4            跳过 model 选择
   cx xhigh yolo         直接使用 xhigh + yolo 启动
   cx low --model o3     使用自定义 model 启动
